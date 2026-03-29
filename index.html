@@ -148,38 +148,86 @@
   </div>
 
   <!-- 설정 파일 -->
-  <script src="./config.js"></script>
+<script src="./config.js"></script>
 
-  <script>
-    function assertConfig() {
-      if (!window.APP_CONFIG) {
-        throw new Error("APP_CONFIG가 없습니다. config.js 파일을 확인하세요.");
-      }
-
-      const { KAKAO_JS_KEY, PUBLIC_API_KEY } = window.APP_CONFIG;
-
-      if (!KAKAO_JS_KEY || KAKAO_JS_KEY.includes("여기에")) {
-        throw new Error("KAKAO_JS_KEY가 설정되지 않았습니다.");
-      }
-
-      if (!PUBLIC_API_KEY || PUBLIC_API_KEY.includes("여기에")) {
-        throw new Error("PUBLIC_API_KEY가 설정되지 않았습니다.");
-      }
+<script>
+  function assertConfig() {
+    if (!window.APP_CONFIG) {
+      throw new Error("APP_CONFIG가 없습니다. config.js 파일을 확인하세요.");
     }
 
-    try {
-      assertConfig();
-    } catch (error) {
-      console.error(error);
+    const rawKakaoKey = window.APP_CONFIG.KAKAO_JS_KEY;
+    const rawPublicKey = window.APP_CONFIG.PUBLIC_API_KEY;
+
+    const KAKAO_JS_KEY = String(rawKakaoKey || "").trim();
+    const PUBLIC_API_KEY = String(rawPublicKey || "").trim();
+
+    if (!KAKAO_JS_KEY) {
+      throw new Error("KAKAO_JS_KEY가 비어 있습니다.");
+    }
+
+    if (!PUBLIC_API_KEY) {
+      throw new Error("PUBLIC_API_KEY가 비어 있습니다.");
+    }
+
+    window.APP_CONFIG.KAKAO_JS_KEY = KAKAO_JS_KEY;
+    window.APP_CONFIG.PUBLIC_API_KEY = PUBLIC_API_KEY;
+  }
+
+  try {
+    assertConfig();
+  } catch (error) {
+    console.error(error);
+    document.getElementById("info-panel").innerHTML = `
+      <div class="site-card">
+        <div class="error-text">설정 파일 오류</div>
+        <div class="muted">${error.message}</div>
+      </div>
+    `;
+    throw error;
+  }
+
+  (function loadKakaoSdk() {
+    const sdkUrl = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(window.APP_CONFIG.KAKAO_JS_KEY)}&autoload=false&libraries=services`;
+
+    console.log("카카오 SDK 요청 URL:", sdkUrl);
+
+    const script = document.createElement("script");
+    script.src = sdkUrl;
+
+    script.onload = function () {
+      console.log("카카오 SDK 스크립트 로드 완료");
+      console.log("typeof kakao =", typeof kakao);
+
+      if (typeof kakao === "undefined" || !kakao.maps) {
+        console.error("카카오 SDK 로드 후 kakao 객체를 찾지 못했습니다.");
+        document.getElementById("info-panel").innerHTML = `
+          <div class="site-card">
+            <div class="error-text">카카오 지도 SDK 로드 실패</div>
+            <div class="muted">SDK는 내려왔지만 kakao 객체가 생성되지 않았습니다.</div>
+          </div>
+        `;
+        return;
+      }
+
+      initializeApp();
+    };
+
+    script.onerror = function (event) {
+      console.error("카카오 SDK 요청 실패", event);
+      console.error("실패한 URL:", sdkUrl);
+
       document.getElementById("info-panel").innerHTML = `
         <div class="site-card">
-          <div class="error-text">설정 파일 오류</div>
-          <div class="muted">${error.message}</div>
+          <div class="error-text">카카오 지도 SDK 요청 실패</div>
+          <div class="muted">브라우저 확장프로그램, 네트워크 차단, 키 문자열 공백 여부를 확인하세요.</div>
         </div>
       `;
-      throw error;
-    }
-  </script>
+    };
+
+    document.head.appendChild(script);
+  })();
+</script>
 
   <!-- 카카오 SDK는 설정파일을 읽은 뒤 동적으로 삽입 -->
   <script>
