@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>제일건설 전국 현장 관제 대시보드</title>
+    <style>
+        body { margin: 0; padding: 0; font-family: 'Malgun Gothic', sans-serif; display: flex; height: 100vh; background-color: #f4f6f9; }
+        #map { width: 70%; height: 100%; box-shadow: 2px 0 5px rgba(0,0,0,0.1); z-index: 1; }
+        #sidebar { width: 30%; height: 100%; background-color: #ffffff; padding: 25px; box-sizing: border-box; overflow-y: auto; z-index: 2; }
+        .header-title { color: #1a365d; margin-top: 0; padding-bottom: 15px; border-bottom: 3px solid #1a365d; font-size: 24px; font-weight: bold; }
+        .site-card { background: #f8f9fa; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e9ecef; }
+        .site-card h3 { margin: 0 0 15px 0; color: #2b6cb0; font-size: 22px; }
+        .info-row { margin-bottom: 8px; font-size: 15px; color: #4a5568; }
+        .weather-panel { background: #ebf8ff; padding: 15px; border-radius: 8px; margin-top: 20px; border: 1px solid #bee3f8; }
+        .weather-panel h4 { margin: 0 0 10px 0; color: #2c5282; }
+        .weather-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .weather-item { background: white; padding: 10px; border-radius: 5px; text-align: center; font-weight: bold; color: #2d3748; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .weather-item span { display: block; font-size: 12px; color: #718096; font-weight: normal; margin-bottom: 5px; }
+        .dust-panel { background: #edf2f7; padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid #cbd5e0; }
+        .dust-panel h4 { margin: 0 0 10px 0; color: #4a5568; }
+        .loading { color: #d69e2e; font-weight: bold; font-size: 13px; }
+        .error { color: #e53e3e; font-size: 13px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <div id="sidebar">
+        <h2 class="header-title">🏢 현장 관제 시스템</h2>
+        <div id="info-panel" class="site-card">
+            <p style="text-align:center; color:#718096; margin-top:30px;">
+                지도에서 현장 마커를 클릭하시면<br>상세 정보와 실시간 기상/환경 데이터가 표시됩니다.
+            </p>
+        </div>
+    </div>
+
+    <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=6efd72b0a42fc9cbfa8a32b19b0a6833&libraries=services"></script>
+    
+    <script>
+        // ==========================================
+        // [2] 공공데이터포털 API 키 입력 (반드시 Decoding 키 사용)
+        // ==========================================
+        const WEATHER_API_KEY = 'cfd9a073201112ffc7fa539a2bd8e5fb737e4ecb1e36a8b5f2cb0bdef313dcab';     // 기상청 (단기예보)
+        const AIR_API_KEY = 'cfd9a073201112ffc7fa539a2bd8e5fb737e4ecb1e36a8b5f2cb0bdef313dcab';         // 한국환경공단 (대기오염)
+
+        // --- (이하 코드는 건드리지 않으셔도 자동으로 작동합니다) ---
+
+        // 기상청 격자 변환 함수
+        function dfs_xy_conv(code, v1, v2) {
+            var RE = 6371.00877; var GRID = 5.0; var SLAT1 = 30.0; var SLAT2 = 60.0; var OLON = 126.0; var OLAT = 38.0; var XO = 43; var YO = 136;
+            var DEGRAD = Math.PI / 180.0; var RADDEG = 180.0 / Math.PI;
+            var re = RE / GRID; var slat1 = SLAT1 * DEGRAD; var slat2 = SLAT2 * DEGRAD; var olon = OLON * DEGRAD; var olat = OLAT * DEGRAD;
+            var sn = Math.tan(Math.PI * 0.25 + slat2 * 0.5) / Math.tan(Math.PI * 0.25 + slat1 * 0.5); sn = Math.log(Math.cos(slat1) / Math.cos(slat2)) / Math.log(sn);
+            var sf = Math.tan(Math.PI * 0.25 + slat1 * 0.5); sf = Math.pow(sf, sn) * Math.cos(slat1) / sn;
+            var ro = Math.tan(Math.PI * 0.25 + olat * 0.5); ro = re * sf / Math.pow(ro, sn);
+            var rs = {};
+            if (code == "toXY") {
+                rs['lat'] = v1; rs['lng'] = v2;
+                var ra = Math.tan(Math.PI * 0.25 + (v1) * DEGRAD * 0.5); ra = re * sf / Math.pow(ra, sn);
+                var theta = v2 * DEGRAD - olon; if (theta > Math.PI) theta -= 2.0 * Math.PI; if (theta < -Math.PI) theta += 2.0 * Math.PI; theta *= sn;
+                rs['x'] = Math.floor(ra * Math.sin(theta) + XO + 0.5);
+                rs['y'] = Math.floor(ro - ra * Math.cos(theta) + YO + 0.5);
+            }
+            return rs;
+        }
+
+        // 기상청용 시간 계산
+        function getBaseDateTime() {
+            let now = new Date();
+            if(now.getMinutes() < 40) { now.setHours(now.getHours() - 1); }
+            let year = now.getFullYear();
+            let month = ('0' + (now.getMonth() + 1)).slice(-2);
+            let day = ('0' + now.getDate()).slice(-2);
+            let hours = ('0' + now.getHours()).slice(-2);
+            return { date: `${year}${month}${day}`, time: `${hours}00` };
+        }
+
+        // 1. 기상청 실시간 날씨 호출
+        async function fetchWeatherData(lat, lng) {
+            let grid = dfs_xy_conv("toXY", lat, lng);
+            let baseTime = getBaseDateTime();
+            let url = `https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst?serviceKey=${WEATHER_API_KEY}&pageNo=1&numOfRows=10&dataType=JSON&base_date=${baseTime.date}&base_time=${baseTime.time}&nx=${grid.x}&ny=${grid.y}`;
+            try {
+                let res = await fetch(url); let data = await res.json();
+                let items = data.response.body.items.item;
+                let info = { temp: "-", humidity: "-", wind: "-" };
+                items.forEach(item => {
+                    if (item.category === "T1H") info.temp = item.obsrValue;
+                    if (item.category === "REH") info.humidity = item.obsrValue;
+                    if (item.category === "WSD") info.wind = item.obsrValue;
+                });
+                return info;
+            } catch (e) { return null; }
+        }
+
+        // 2. 환경공단 미세먼지 호출 (카카오 TM좌표 변환 -> 근접측정소 -> 미세먼지 데이터)
+        function getTMCoords(lng, lat) {
+            return new Promise((resolve) => {
+                geocoder.transCoord(lng, lat, function(result, status) {
+                    if (status === kakao.maps.services.Status.OK) resolve({ x: result[0].x, y: result[0].y });
+                    else resolve(null);
+                }, { input_coord: kakao.maps.services.Coords.WGS84, output_coord: kakao.maps.services.Coords.TM });
+            });
+        }
+
+        async function fetchAirData(lat, lng) {
+            try {
+                // 2-1. 위경도를 TM좌표로 변환 (환경공단용)
+                let tm = await getTMCoords(lng, lat);
+                if(!tm) return null;
+
+                // 2-2. 근접 측정소 찾기
+                let stnUrl = `https://apis.data.go.kr/B552584/MsrstnInfoInqireSvc/getNearbyMsrstnList?tmX=${tm.x}&tmY=${tm.y}&returnType=json&serviceKey=${AIR_API_KEY}`;
+                let stnRes = await fetch(stnUrl); let stnData = await stnRes.json();
+                let stationName = stnData.response.body.items[0].stationName;
+
+                // 2-3. 해당 측정소 미세먼지 농도 조회
+                let airUrl = `https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getMsrstnAcctoRltmMesureDnsty?stationName=${encodeURIComponent(stationName)}&dataTerm=DAILY&pageNo=1&numOfRows=1&returnType=json&serviceKey=${AIR_API_KEY}`;
+                let airRes = await fetch(airUrl); let airData = await airRes.json();
+                let airInfo = airData.response.body.items[0];
+
+                return {
+                    station: stationName,
+                    pm10: airInfo.pm10Value || "-", 
+                    pm25: airInfo.pm25Value || "-"
+                };
+            } catch (e) { return null; }
+        }
+
+        // 지도 초기화 및 현장 데이터
+        var mapContainer = document.getElementById('map'), mapOption = { center: new kakao.maps.LatLng(36.5, 127.5), level: 12 };  
+        var map = new kakao.maps.Map(mapContainer, mapOption); 
+        var geocoder = new kakao.maps.services.Geocoder();
+
+        var sites = [
+            {name: "광주첨단A2", address: "전라남도 장성군 진원면 산동리 540-12", scale: "1845세대"},
+            {name: "광주첨단A5", address: "광주광역시 북구 월출동 696-7", scale: "584세대"},
+            {name: "파주운정A46", address: "경기도 파주시 동매동 415-13", scale: "383세대"},
+            {name: "인천검단AB20-1", address: "인천광역시 서구 불로동 569-14", scale: "610세대"},
+            {name: "인천계양A2(LH)", address: "인천광역시 계양구 동양동 416-1번지", scale: "747세대"},
+            {name: "인천계양A3(LH)", address: "인천광역시 계양구 동양동 416-1번지", scale: "538세대"},
+            {name: "고양장항B1", address: "경기도 고양시 일산동구 장항동 658-65", scale: "1184세대"},
+            {name: "인천검단AA22", address: "인천광역시 서구 고산후로 356-14", scale: "1048세대"},
+            {name: "제주중부", address: "제주특별자치도 제주시 천수동로61(건입동)", scale: "728세대"},
+            {name: "파주운정A45", address: "경기도 파주시 목동동 363", scale: "520세대"},
+            {name: "인천검단AB21-2", address: "인천광역시 서구 불로동 489-16", scale: "918세대"},
+            {name: "광주봉산", address: "광주광역시 광산구 월계동 산 22번지", scale: "948세대"},
+            {name: "송도2단지", address: "인천시 연수구 송도동 553-1", scale: "548세대"},
+            {name: "송도1단지", address: "인천시 연수구 송도동 553-1", scale: "469세대"},
+            {name: "곤지암A1", address: "경기도 광주시 곤지암읍 곤지암리 636", scale: "565세대"},
+            {name: "파주운정A3", address: "경기도 파주시 당하동 513", scale: "1222세대"},
+            {name: "송도4단지", address: "인천시 연수구 송도동 553-1", scale: "504세대"},
+            {name: "양주역공동3", address: "경기도 양주시 남방동 588", scale: "580세대"},
+            {name: "청주장성A1", address: "충청북도 청주시 서원구 장성동 204", scale: "1448세대"},
+            {name: "김해시례B3", address: "경상남도 김해시 진례면 시례리 산59-2", scale: "440세대"},
+            {name: "여수죽림A5", address: "전라남도 여수시 소라면 죽림리 66-1", scale: "665세대"},
+            {name: "대구금호D2", address: "대구광역시 북구 검단동 154번지", scale: "1334세대"},
+            {name: "양주역M", address: "경기 양주시 남방동 592", scale: "702세대"},
+            {name: "김해시례B5", address: "경상남도 김해시 진례면 시례리 698-6", scale: "782세대"}
+        ];
+
+        sites.forEach(function(site) {
+            geocoder.addressSearch(site.address, function(result, status) {
+                if (status === kakao.maps.services.Status.OK) {
+                    let lat = result[0].y; let lng = result[0].x;
+                    var marker = new kakao.maps.Marker({ map: map, position: new kakao.maps.LatLng(lat, lng) });
+
+                    kakao.maps.event.addListener(marker, 'click', async function() {
+                        var infoPanel = document.getElementById('info-panel');
+                        
+                        // 1. 클릭 시 로딩 화면 띄우기
+                        infoPanel.innerHTML = `
+                            <div class="site-card">
+                                <h3>🚧 ${site.name}</h3>
+                                <div class="info-row"><b>📍 주소:</b> ${site.address}</div>
+                                <div class="info-row"><b>🏢 규모:</b> ${site.scale}</div>
+                                
+                                <div class="weather-panel">
+                                    <h4>🌤️ 실시간 기상정보</h4>
+                                    <div id="weather-result" class="loading">⏳ 기상청 데이터 로딩 중...</div>
+                                </div>
+                                <div class="dust-panel">
+                                    <h4>💨 대기 환경 (미세먼지)</h4>
+                                    <div id="air-result" class="loading">⏳ 환경공단 데이터 로딩 중...</div>
+                                </div>
+                            </div>
+                        `;
+                        map.setLevel(5); map.panTo(new kakao.maps.LatLng(lat, lng));
+
+                        // 2. 기상청 & 환경공단 데이터 동시 호출
+                        let [wData, aData] = await Promise.all([fetchWeatherData(lat, lng), fetchAirData(lat, lng)]);
+                        
+                        // 3. 날씨 UI 업데이트
+                        let wResultDiv = document.getElementById('weather-result');
+                        if (wData) {
+                            wResultDiv.innerHTML = `
+                                <div class="weather-grid">
+                                    <div class="weather-item"><span>온도</span>${wData.temp} ℃</div>
+                                    <div class="weather-item"><span>습도</span>${wData.humidity} %</div>
+                                    <div class="weather-item"><span>풍속</span>${wData.wind} m/s</div>
+                                </div>
+                            `;
+                            wResultDiv.classList.remove('loading');
+                        } else { wResultDiv.innerHTML = `<span class="error">❌ 기상청 데이터를 불러오지 못했습니다.</span>`; }
+
+                        // 4. 미세먼지 UI 업데이트
+                        let aResultDiv = document.getElementById('air-result');
+                        if (aData) {
+                            aResultDiv.innerHTML = `
+                                <div class="weather-grid">
+                                    <div class="weather-item" style="background:#fff;"><span>미세먼지(PM10)</span>${aData.pm10} ㎍/㎥</div>
+                                    <div class="weather-item" style="background:#fff;"><span>초미세먼지(PM2.5)</span>${aData.pm25} ㎍/㎥</div>
+                                </div>
+                                <div style="font-size:12px; color:#718096; margin-top:8px; text-align:right;">측정소: ${aData.station}</div>
+                            `;
+                            aResultDiv.classList.remove('loading');
+                        } else { aResultDiv.innerHTML = `<span class="error">❌ 환경공단 데이터를 불러오지 못했습니다.</span>`; }
+                    });
+                } 
+            });
+        });
+    </script>
+</body>
+</html>
