@@ -20,13 +20,11 @@
         .dust-panel { background: #edf2f7; padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid #cbd5e0; }
         .dust-panel h4 { margin: 0 0 10px 0; color: #4a5568; }
         .loading { color: #d69e2e; font-weight: bold; font-size: 13px; }
-        .error { color: #e53e3e; font-size: 13px; font-weight: bold; }
     </style>
 </head>
 <body>
 
     <div id="map"></div>
-
     <div id="sidebar">
         <h2 class="header-title">🏢 현장 관제 시스템</h2>
         <div id="info-panel" class="site-card">
@@ -36,16 +34,15 @@
         </div>
     </div>
 
-    <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=6efd72b0a42fc9cbfa8a32b19b0a6833&libraries=services"></script>
+    <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=6efd72b0a42fc9cbfa8a32b19b0a6833&libraries=services"></script>
     
     <script>
-        // [2] 공공데이터포털 API 키 적용 (보내주신 키 적용)
         const API_KEY = 'cfd9a073201112ffc7fa539a2bd8e5fb737e4ecb1e36a8b5f2cb0bdef313dcab';
 
-        // 기상청 격자 변환 함수
+        // 기상청 격자 변환 및 날씨 로직 (보존)
         function dfs_xy_conv(code, v1, v2) {
             var RE = 6371.00877, GRID = 5.0, SLAT1 = 30.0, SLAT2 = 60.0, OLON = 126.0, OLAT = 38.0, XO = 43, YO = 136;
-            var DEGRAD = Math.PI / 180.0, RADDEG = 180.0 / Math.PI;
+            var DEGRAD = Math.PI / 180.0;
             var re = RE / GRID, slat1 = SLAT1 * DEGRAD, slat2 = SLAT2 * DEGRAD, olon = OLON * DEGRAD, olat = OLAT * DEGRAD;
             var sn = Math.tan(Math.PI * 0.25 + slat2 * 0.5) / Math.tan(Math.PI * 0.25 + slat1 * 0.5);
             sn = Math.log(Math.cos(slat1) / Math.cos(slat2)) / Math.log(sn);
@@ -107,9 +104,13 @@
             } catch (e) { return null; }
         }
 
-        // 지도 초기화 (안전하게 window.onload 사용)
+        // 지도 초기화 및 현장 리스트 (전체 보존)
         var map, geocoder;
         window.onload = function() {
+            if (typeof kakao === 'undefined') {
+                alert("카카오 지도를 불러오지 못했습니다. 앱 키와 도메인 설정을 확인해주세요.");
+                return;
+            }
             var mapContainer = document.getElementById('map'), mapOption = { center: new kakao.maps.LatLng(36.5, 127.5), level: 12 };  
             map = new kakao.maps.Map(mapContainer, mapOption); 
             geocoder = new kakao.maps.services.Geocoder();
@@ -164,12 +165,8 @@
                                 </div>`;
                             map.setLevel(5); map.panTo(new kakao.maps.LatLng(lat, lng));
                             let [wData, aData] = await Promise.all([fetchWeatherData(lat, lng), fetchAirData(lat, lng)]);
-                            if (wData) {
-                                document.getElementById('weather-result').innerHTML = `<div class="weather-grid"><div class="weather-item"><span>온도</span>${wData.temp}℃</div><div class="weather-item"><span>습도</span>${wData.humidity}%</div><div class="weather-item"><span>풍속</span>${wData.wind}m/s</div></div>`;
-                            }
-                            if (aData) {
-                                document.getElementById('air-result').innerHTML = `<div class="weather-grid"><div class="weather-item"><span>PM10</span>${aData.pm10}</div><div class="weather-item"><span>PM2.5</span>${aData.pm25}</div></div>`;
-                            }
+                            if (wData) document.getElementById('weather-result').innerHTML = `<div class="weather-grid"><div class="weather-item"><span>온도</span>${wData.temp}℃</div><div class="weather-item"><span>습도</span>${wData.humidity}%</div><div class="weather-item"><span>풍속</span>${wData.wind}m/s</div></div>`;
+                            if (aData) document.getElementById('air-result').innerHTML = `<div class="weather-grid"><div class="weather-item"><span>PM10</span>${aData.pm10}</div><div class="weather-item"><span>PM2.5</span>${aData.pm25}</div></div>`;
                         });
                     } 
                 });
